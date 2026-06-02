@@ -76,7 +76,7 @@ func TestClientProviderAppliesFactoryOptions(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, transportErr)
+	require.ErrorIs(t, err, transportErr)
 	assert.Equal(t, 1, called)
 }
 
