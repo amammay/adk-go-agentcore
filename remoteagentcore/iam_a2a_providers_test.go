@@ -2,11 +2,13 @@ package remoteagentcore
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 	agentcore "github.com/amammay/adk-go-agentcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +30,54 @@ func TestNewIAMA2AProviders(t *testing.T) {
 	assert.NotNil(t, providers.AgentCardProvider())
 	assert.NotNil(t, providers.ClientProvider())
 	assert.Same(t, baseTransport, client.Transport)
+}
+
+func TestClientProviderAppliesFactoryOptions(t *testing.T) {
+	providers, err := NewIAMA2AProviders(
+		"arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/example",
+		aws.Config{Region: "us-east-1"},
+	)
+	require.NoError(t, err)
+
+	transportErr := errors.New("custom transport")
+	called := 0
+	provider := providers.ClientProvider(
+		a2aclient.WithDefaultsDisabled(),
+		a2aclient.WithTransport(
+			a2a.TransportProtocolJSONRPC,
+			a2aclient.TransportFactoryFn(func(context.Context, *a2a.AgentCard, *a2a.AgentInterface) (a2aclient.Transport, error) {
+				called++
+				return nil, transportErr
+			}),
+		),
+	)
+
+	_, err = provider(context.Background(), &a2a.AgentCard{
+		Name:               "remote",
+		Description:        "Remote agent",
+		Version:            "dev",
+		DefaultInputModes:  []string{"text"},
+		DefaultOutputModes: []string{"text"},
+		Skills: []a2a.AgentSkill{
+			{
+				ID:          "answer",
+				Name:        "Answer",
+				Description: "Answers questions",
+				Tags:        []string{"test"},
+			},
+		},
+		SupportedInterfaces: []*a2a.AgentInterface{
+			{
+				URL:             "https://example.com/a2a",
+				ProtocolBinding: a2a.TransportProtocolJSONRPC,
+				ProtocolVersion: a2a.Version,
+			},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, transportErr)
+	assert.Equal(t, 1, called)
 }
 
 func TestNewIAMA2AProvidersRequiresRuntimeARN(t *testing.T) {

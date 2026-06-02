@@ -78,7 +78,7 @@ func WithSessionIDProvider(provider func(context.Context) (string, error)) A2AOp
 // A2AProviders holds the ADK providers needed to connect to an AgentCore A2A runtime.
 type A2AProviders struct {
 	agentCardProvider remoteagent.AgentCardProvider
-	clientProvider    remoteagent.A2AClientProvider
+	client            *http.Client
 }
 
 // AgentCardProvider returns the provider used to resolve the AgentCore runtime agent card.
@@ -87,8 +87,11 @@ func (p *A2AProviders) AgentCardProvider() remoteagent.AgentCardProvider {
 }
 
 // ClientProvider returns the provider used to create A2A clients for the AgentCore runtime.
-func (p *A2AProviders) ClientProvider() remoteagent.A2AClientProvider {
-	return p.clientProvider
+//
+// Factory options are passed through to a2aclient.NewFactory. The AgentCore
+// compatibility transport is always added to the resulting factory options.
+func (p *A2AProviders) ClientProvider(opts ...a2aclient.FactoryOption) remoteagent.A2AClientProvider {
+	return newCompatA2AClientProvider(p.client, opts...)
 }
 
 // NewIAMA2AProviders returns ADK providers configured for IAM-authenticated AgentCore A2A.
@@ -121,7 +124,7 @@ func NewIAMA2AProviders(runtimeARN string, cfg aws.Config, opts ...A2AOption) (*
 
 	return &A2AProviders{
 		agentCardProvider: newAgentCardProvider(resolver, runtimeURL, options.sessionIDProvider),
-		clientProvider:    newCompatA2AClientProvider(client),
+		client:            client,
 	}, nil
 }
 
@@ -196,16 +199,19 @@ func agentCoreAgentCardParser(body []byte) (*a2a.AgentCard, error) {
 	return agentcard.DefaultCardParser(body)
 }
 
-func newCompatA2AClientProvider(client *http.Client) remoteagent.A2AClientProvider {
-	return remoteagent.NewA2AClientProvider(
-		a2aclient.NewFactory(
-			a2aclient.WithCompatTransport(
-				a2av0.Version,
-				a2a.TransportProtocolJSONRPC,
-				a2av0.NewJSONRPCTransportFactory(a2av0.JSONRPCTransportConfig{
-					Client: client,
-				}),
-			),
+func newCompatA2AClientProvider(client *http.Client, opts ...a2aclient.FactoryOption) remoteagent.A2AClientProvider {
+	factoryOptions := append([]a2aclient.FactoryOption{}, opts...)
+	factoryOptions = append(factoryOptions,
+		a2aclient.WithCompatTransport(
+			a2av0.Version,
+			a2a.TransportProtocolJSONRPC,
+			a2av0.NewJSONRPCTransportFactory(a2av0.JSONRPCTransportConfig{
+				Client: client,
+			}),
 		),
+	)
+
+	return remoteagent.NewA2AClientProvider(
+		a2aclient.NewFactory(factoryOptions...),
 	)
 }
